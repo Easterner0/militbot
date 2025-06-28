@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 TARGET_ACCOUNTS = [
     "@Philipp27960841", "@FaytuksNetwork", "@no_itsmyturn",
     "@AZ_Intel_", "@JasonMBrodsky", "@sentdefender",
-    "@OSINTtechnical", "@IntelCrab", "@AuroraIntel"
+    "@OSINTtechnical", "@IntelCrab", "@AuroraIntel", "@EretzInfo"
 ]
 SPECIAL_KEYWORDS = [
     "iran", "islamic republic", "tehran", "ayatollah khamenei", "supreme leader",
@@ -43,8 +43,6 @@ SPECIAL_KEYWORDS = [
     "conflict zone", "strategic interests", "foreign intervention",
     "un resolution", "diplomatic crisis", "military escalation", "sanctions regime"
 ]
-
-# --- بخش جدید: دیکشنری نام کشورها و پرچم آنها ---
 COUNTRY_FLAGS = {
     'iran': '🇮🇷', 'israel': '🇮🇱', 'palestine': '🇵🇸', 'gaza': '🇵🇸',
     'lebanon': '🇱🇧', 'hezbollah': '🇱🇧', 'syria': '🇸🇾', 'iraq': '🇮🇶',
@@ -55,12 +53,9 @@ COUNTRY_FLAGS = {
     'qatar': '🇶🇦', 'jordan': '🇯🇴', 'egypt': '🇪🇬', 'china': '🇨🇳',
     'pakistan': '🇵🇰', 'afghanistan': '🇦🇫', 'armenia': '🇦🇲', 'azerbaijan': '🇦🇿'
 }
-
-# --- تنظیمات تلگرام ---
 TELEGRAM_BOT_TOKEN = "8096746493:AAHgoVUKL3Nu-joz4mAMb88PHW7MJ7ffpjQ"
 TELEGRAM_CHAT_ID = "@xxxmilitary" 
 ADMIN_CHAT_ID = "141252573" 
-
 SENT_TWEETS_FILE = "sent_tweets.txt"
 AUTH_FILE = "auth_state.json"
 
@@ -128,7 +123,7 @@ def main():
             print("✅ ورود با موفقیت (با استفاده از کوکی) انجام شد.")
             human_like_delay()
 
-            five_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=5, seconds=30) # کمی زمان بیشتر برای پوشش تاخیرها
+            five_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=5, seconds=30)
 
             for account in TARGET_ACCOUNTS:
                 try: 
@@ -160,23 +155,21 @@ def main():
                             if "/status/" in tweet_link and tweet_link not in sent_tweets:
                                 print(f"✅ توییت جدید (در ۵ دقیقه اخیر) یافت شد: {tweet_link}")
                                 
-                                tweet_text_element = tweet_element.locator('div[data-testid="tweetText"]')
+                                # --- رفع خطای Strict Mode با استفاده از .first ---
+                                tweet_text_element = tweet_element.locator('div[data-testid="tweetText"]').first
                                 tweet_text = tweet_text_element.inner_text()
                                 
                                 emoji_prefix = ""
                                 tweet_text_lower = tweet_text.lower()
                                 
-                                # بررسی کلمات کلیدی ویژه
                                 for keyword in SPECIAL_KEYWORDS:
                                     if keyword in tweet_text_lower:
                                         emoji_prefix = "🚨💥❗️\n"
                                         print(f"   - کلمه کلیدی ویژه یافت شد: '{keyword}'")
                                         break
                                 
-                                # --- بخش جدید: بررسی پرچم کشورها ---
                                 country_flags_found = set()
                                 for country, flag in COUNTRY_FLAGS.items():
-                                    # استفاده از " " + country + " " برای جلوگیری از پیدا شدن کلمات مشابه (مثلا 'iran' در 'iranian')
                                     if f' {country} ' in f' {tweet_text_lower} ':
                                         country_flags_found.add(flag)
                                 
@@ -184,7 +177,6 @@ def main():
                                     flags_str = "".join(country_flags_found)
                                     emoji_prefix = flags_str + " " + emoji_prefix
                                     print(f"   - پرچم کشور(ها) یافت شد: {flags_str}")
-
 
                                 message_to_send = (
                                     f"{emoji_prefix}"
