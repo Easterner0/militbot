@@ -14,7 +14,6 @@ TARGET_ACCOUNTS = [
 ]
 
 # --- کلمات کلیدی ویژه برای اضافه کردن اموجی ---
-# اگر یکی از این کلمات (بدون حساسیت به حروف بزرگ/کوچک) در متن توییت باشد، اموجی هشدار اضافه می‌شود
 SPECIAL_KEYWORDS = [
     "iran", "islamic republic", "tehran", "ayatollah khamenei", "supreme leader",
     "ebrahim raisi", "irgc", "revolutionary guards", "quds force", "basij",
@@ -47,10 +46,8 @@ SPECIAL_KEYWORDS = [
     "un resolution", "diplomatic crisis", "military escalation", "sanctions regime"
 ]
 
-
 # --- تنظیمات تلگرام ---
 TELEGRAM_BOT_TOKEN = "8096746493:AAHgoVUKL3Nu-joz4mAMb88PHW7MJ7ffpjQ"
-# شناسه کانال شما
 TELEGRAM_CHAT_ID = "@xxxmilitary" 
 
 SENT_TWEETS_FILE = "sent_tweets.txt"
@@ -90,37 +87,51 @@ def human_like_delay(min_seconds=2, max_seconds=4):
     time.sleep(random.uniform(min_seconds, max_seconds))
 
 def main():
+    # --- رفع مشکل UnboundLocalError با تعریف متغیر در ابتدای تابع ---
+    new_tweets_found_in_this_run = 0
+    
     sent_tweets = load_sent_tweets()
     print(f"🚀 کراولر توییتر شروع به کار کرد... ({len(sent_tweets)} توییت قبلا ارسال شده است)")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-        page = context.new_page()
-
+        browser = None # تعریف اولیه برای دسترسی در بلاک finally
         try:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+            page = context.new_page()
+
             print("۱. در حال ورود به توییتر...")
             page.goto("https://x.com/login", timeout=60000)
             human_like_delay()
+            
+            print("   - وارد کردن نام کاربری...")
             page.locator('//input[@name="text"]').fill(TWITTER_USER)
             page.locator('//span[text()="Next"]').click()
-            human_like_delay()
             
+            # --- رفع مشکل Timeout با افزودن انتظار هوشمند ---
+            print("   - منتظر ماندن برای صفحه رمز عبور...")
+            page.wait_for_load_state('domcontentloaded', timeout=15000)
+            human_like_delay()
+
+            # بررسی وجود سوال امنیتی
             try:
                 verification_input = page.locator('//input[@data-testid="ocfEnterTextTextInput"]', timeout=5000)
                 if verification_input.is_visible():
+                    print("   - پاسخ به سوال امنیتی...")
                     verification_input.fill(TWITTER_USER.strip('@'))
                     page.locator('//span[text()="Next"]').click()
+                    page.wait_for_load_state('domcontentloaded', timeout=15000)
                     human_like_delay()
-            except Exception: pass
-
-            page.locator('//input[@name="password"]').fill(TWITTER_PASS)
+            except Exception: 
+                pass # اگر سوالی نبود، ادامه بده
+            
+            print("   - وارد کردن رمز عبور...")
+            password_input = page.locator('//input[@name="password"]')
+            password_input.fill(TWITTER_PASS, timeout=40000) # افزایش زمان انتظار
             page.locator('//span[text()="Log in"]').click()
             page.wait_for_url("https://x.com/home", timeout=60000)
             print("ورود با موفقیت انجام شد.")
             human_like_delay()
-
-            new_tweets_found_in_this_run = 0
 
             for account in TARGET_ACCOUNTS:
                 try: 
@@ -141,16 +152,14 @@ def main():
                         tweet_text_element = latest_tweet_element.locator('div[data-testid="tweetText"]')
                         tweet_text = tweet_text_element.inner_text()
                         
-                        # --- بخش جدید: بررسی کلمات کلیدی ویژه ---
                         emoji_prefix = ""
                         tweet_text_lower = tweet_text.lower()
                         for keyword in SPECIAL_KEYWORDS:
                             if keyword in tweet_text_lower:
                                 emoji_prefix = "🚨💥❗️\n"
                                 print(f"   - کلمه کلیدی ویژه یافت شد: '{keyword}'")
-                                break # بعد از پیدا کردن اولین کلمه، از حلقه خارج شو
-
-                        # فرمت کردن پیام برای تلگرام
+                                break
+                        
                         message_to_send = (
                             f"{emoji_prefix}"
                             f"<b>New Tweet from {account}</b>\n\n"
@@ -170,14 +179,19 @@ def main():
                     continue
 
         except Exception as e:
-            error_message = f"❌ یک خطای کلی در اسکریپت رخ داد: {e}"
-            print(error_message)
-            page.screenshot(path="error_screenshot.png")
-            send_telegram_message(f"<b>Crawler Error!</b>\n\n<pre>{error_message}</pre>")
+            # بهبود گزارش خطا برای ارسال به تلگرام
+            error_message = f"❌ یک خطای کلی در اسکریپت رخ داد:\n\n<pre>{e}</pre>"
+            print(error_message.replace("<pre>", "").replace("</pre>", "")) # نمایش خطا در لاگ گیت‌هاب
+            try:
+                page.screenshot(path="error_screenshot.png")
+                print("یک اسکرین‌شات از صفحه در فایل error_screenshot.png ذخیره شد.")
+            except: pass
+            send_telegram_message(error_message)
 
         finally:
             print(f"\n🔚 کراولر به کار خود پایان داد. {new_tweets_found_in_this_run} توییت جدید در این اجرا ارسال شد.")
-            browser.close()
+            if browser:
+                browser.close()
 
 if __name__ == "__main__":
     main()
