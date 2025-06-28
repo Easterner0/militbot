@@ -2,18 +2,15 @@ import time
 import random
 import requests
 import os
+import json # --- ایمپورت کردن کتابخانه استاندارد جیسون
 from playwright.sync_api import sync_playwright
 
-# ------------------- بخش تنظیمات: اینجا را شخصی‌سازی کنید -------------------
-
-# لیست اکانت‌های توییتری که می‌خواهید بررسی شوند
+# ------------------- بخش تنظیمات -------------------
 TARGET_ACCOUNTS = [
     "@Philipp27960841", "@FaytuksNetwork", "@no_itsmyturn",
     "@AZ_Intel_", "@JasonMBrodsky", "@sentdefender",
     "@OSINTtechnical", "@IntelCrab", "@AuroraIntel", "@EretzInfo"
 ]
-
-# --- کلمات کلیدی ویژه برای اضافه کردن اموجی ---
 SPECIAL_KEYWORDS = [
     "iran", "islamic republic", "tehran", "ayatollah khamenei", "supreme leader",
     "ebrahim raisi", "irgc", "revolutionary guards", "quds force", "basij",
@@ -45,16 +42,10 @@ SPECIAL_KEYWORDS = [
     "conflict zone", "strategic interests", "foreign intervention",
     "un resolution", "diplomatic crisis", "military escalation", "sanctions regime"
 ]
-
-# --- تنظیمات تلگرام ---
 TELEGRAM_BOT_TOKEN = "8096746493:AAHgoVUKL3Nu-joz4mAMb88PHW7MJ7ffpjQ"
 TELEGRAM_CHAT_ID = "@xxxmilitary" 
-
 SENT_TWEETS_FILE = "sent_tweets.txt"
-
-# --- اطلاعات ورود توییتر ---
-TWITTER_USER = "x_xx_military"
-TWITTER_PASS = "Mojib_1994"
+AUTH_FILE = "auth_state.json" # نام فایل کوکی
 
 # ------------------- پایان بخش تنظیمات -------------------
 
@@ -87,50 +78,39 @@ def human_like_delay(min_seconds=2, max_seconds=4):
     time.sleep(random.uniform(min_seconds, max_seconds))
 
 def main():
-    # --- رفع مشکل UnboundLocalError با تعریف متغیر در ابتدای تابع ---
     new_tweets_found_in_this_run = 0
-    
     sent_tweets = load_sent_tweets()
     print(f"🚀 کراولر توییتر شروع به کار کرد... ({len(sent_tweets)} توییت قبلا ارسال شده است)")
 
     with sync_playwright() as p:
-        browser = None # تعریف اولیه برای دسترسی در بلاک finally
+        browser = None 
         try:
+            # بررسی وجود فایل کوکی
+            if not os.path.exists(AUTH_FILE):
+                error_message = f"❌ فایل کوکی '{AUTH_FILE}' پیدا نشد! لطفاً ابتدا اسکریپت ذخیره کوکی را اجرا کنید."
+                print(error_message)
+                send_telegram_message(error_message)
+                return
+
+            print(f"فایل '{AUTH_FILE}' پیدا شد. در حال استفاده از کوکی برای ورود...")
+            # --- تغییر کلیدی: خواندن فایل کوکی با فرمت استاندارد JSON ---
+            with open(AUTH_FILE, 'r') as f:
+                storage_state = json.load(f)
+            
             browser = p.chromium.launch(headless=True)
-            context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+            context = browser.new_context(storage_state=storage_state, user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
             page = context.new_page()
+            
+            print("در حال بررسی وضعیت ورود با مراجعه به صفحه Home...")
+            page.goto("https://x.com/home", wait_until='domcontentloaded', timeout=40000)
+            
+            if "home" not in page.url:
+                error_message = "❌ کوکی نامعتبر است یا منقضی شده. لطفاً فایل auth_state.json جدیدی بسازید و آپلود کنید."
+                print(error_message)
+                send_telegram_message(error_message)
+                return
 
-            print("۱. در حال ورود به توییتر...")
-            page.goto("https://x.com/login", timeout=60000)
-            human_like_delay()
-            
-            print("   - وارد کردن نام کاربری...")
-            page.locator('//input[@name="text"]').fill(TWITTER_USER)
-            page.locator('//span[text()="Next"]').click()
-            
-            # --- رفع مشکل Timeout با افزودن انتظار هوشمند ---
-            print("   - منتظر ماندن برای صفحه رمز عبور...")
-            page.wait_for_load_state('domcontentloaded', timeout=15000)
-            human_like_delay()
-
-            # بررسی وجود سوال امنیتی
-            try:
-                verification_input = page.locator('//input[@data-testid="ocfEnterTextTextInput"]', timeout=5000)
-                if verification_input.is_visible():
-                    print("   - پاسخ به سوال امنیتی...")
-                    verification_input.fill(TWITTER_USER.strip('@'))
-                    page.locator('//span[text()="Next"]').click()
-                    page.wait_for_load_state('domcontentloaded', timeout=15000)
-                    human_like_delay()
-            except Exception: 
-                pass # اگر سوالی نبود، ادامه بده
-            
-            print("   - وارد کردن رمز عبور...")
-            password_input = page.locator('//input[@name="password"]')
-            password_input.fill(TWITTER_PASS, timeout=40000) # افزایش زمان انتظار
-            page.locator('//span[text()="Log in"]').click()
-            page.wait_for_url("https://x.com/home", timeout=60000)
-            print("ورود با موفقیت انجام شد.")
+            print("✅ ورود با موفقیت (با استفاده از کوکی) انجام شد.")
             human_like_delay()
 
             for account in TARGET_ACCOUNTS:
@@ -179,9 +159,8 @@ def main():
                     continue
 
         except Exception as e:
-            # بهبود گزارش خطا برای ارسال به تلگرام
             error_message = f"❌ یک خطای کلی در اسکریپت رخ داد:\n\n<pre>{e}</pre>"
-            print(error_message.replace("<pre>", "").replace("</pre>", "")) # نمایش خطا در لاگ گیت‌هاب
+            print(error_message.replace("<pre>", "").replace("</pre>", ""))
             try:
                 page.screenshot(path="error_screenshot.png")
                 print("یک اسکرین‌شات از صفحه در فایل error_screenshot.png ذخیره شد.")
