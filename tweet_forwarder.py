@@ -2,8 +2,8 @@ import time
 import random
 import requests
 import os
-import json
-from datetime import datetime, timezone, timedelta # --- ماژول‌های مورد نیاز برای کار با زمان
+import json 
+from datetime import datetime, timezone, timedelta
 from playwright.sync_api import sync_playwright
 
 # ------------------- بخش تنظیمات -------------------
@@ -44,12 +44,22 @@ SPECIAL_KEYWORDS = [
     "un resolution", "diplomatic crisis", "military escalation", "sanctions regime"
 ]
 
+# --- بخش جدید: دیکشنری نام کشورها و پرچم آنها ---
+COUNTRY_FLAGS = {
+    'iran': '🇮🇷', 'israel': '🇮🇱', 'palestine': '🇵🇸', 'gaza': '🇵🇸',
+    'lebanon': '🇱🇧', 'hezbollah': '🇱🇧', 'syria': '🇸🇾', 'iraq': '🇮🇶',
+    'saudi arabia': '🇸🇦', 'yemen': '🇾🇪', 'houthis': '🇾🇪',
+    'united arab emirates': '🇦🇪', 'uae': '🇦🇪', 'turkey': '🇹🇷',
+    'russia': '🇷🇺', 'ukraine': '🇺🇦', 'united states': '🇺🇸', 'usa': '🇺🇸',
+    'u.s.': '🇺🇸', 'america': '🇺🇸', 'united kingdom': '🇬🇧', 'uk': '🇬🇧',
+    'qatar': '🇶🇦', 'jordan': '🇯🇴', 'egypt': '🇪🇬', 'china': '🇨🇳',
+    'pakistan': '🇵🇰', 'afghanistan': '🇦🇫', 'armenia': '🇦🇲', 'azerbaijan': '🇦🇿'
+}
+
 # --- تنظیمات تلگرام ---
 TELEGRAM_BOT_TOKEN = "8096746493:AAHgoVUKL3Nu-joz4mAMb88PHW7MJ7ffpjQ"
-# شناسه کانال عمومی شما برای ارسال توییت‌ها
 TELEGRAM_CHAT_ID = "@xxxmilitary" 
-# شناسه عددی چت خصوصی خودتان برای دریافت خطاها
-ADMIN_CHAT_ID = "634035651" 
+ADMIN_CHAT_ID = "141252573" 
 
 SENT_TWEETS_FILE = "sent_tweets.txt"
 AUTH_FILE = "auth_state.json"
@@ -118,8 +128,7 @@ def main():
             print("✅ ورود با موفقیت (با استفاده از کوکی) انجام شد.")
             human_like_delay()
 
-            # --- تغییر کلیدی: تعریف محدوده زمانی ۵ دقیقه اخیر ---
-            five_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
+            five_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=5, seconds=30) # کمی زمان بیشتر برای پوشش تاخیرها
 
             for account in TARGET_ACCOUNTS:
                 try: 
@@ -129,7 +138,6 @@ def main():
                     page.goto(profile_url, timeout=60000)
                     page.wait_for_selector('//article[@data-testid="tweet"]', timeout=60000)
                     
-                    # کمی اسکرول برای بارگذاری چند توییت اخیر
                     for _ in range(2):
                         page.keyboard.press("PageDown")
                         time.sleep(1)
@@ -138,15 +146,13 @@ def main():
                     print(f"   - تعداد {len(all_recent_tweets)} توییت اخیر بررسی می‌شود...")
 
                     for tweet_element in all_recent_tweets:
-                        # --- تغییر کلیدی: بررسی زمان ارسال توییت ---
                         try:
                             time_element = tweet_element.locator("time").first
                             timestamp_str = time_element.get_attribute("datetime")
                             tweet_time = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
 
-                            # اگر توییت قدیمی‌تر از ۵ دقیقه بود، از آن و بقیه توییت‌های این کاربر بگذر
                             if tweet_time < five_minutes_ago:
-                                continue # برو سراغ توییت بعدی در همین صفحه
+                                continue 
                             
                             link_element = tweet_element.locator('a[href*="/status/"]').first
                             tweet_link = "https://x.com" + link_element.get_attribute('href')
@@ -159,12 +165,27 @@ def main():
                                 
                                 emoji_prefix = ""
                                 tweet_text_lower = tweet_text.lower()
+                                
+                                # بررسی کلمات کلیدی ویژه
                                 for keyword in SPECIAL_KEYWORDS:
                                     if keyword in tweet_text_lower:
                                         emoji_prefix = "🚨💥❗️\n"
                                         print(f"   - کلمه کلیدی ویژه یافت شد: '{keyword}'")
                                         break
                                 
+                                # --- بخش جدید: بررسی پرچم کشورها ---
+                                country_flags_found = set()
+                                for country, flag in COUNTRY_FLAGS.items():
+                                    # استفاده از " " + country + " " برای جلوگیری از پیدا شدن کلمات مشابه (مثلا 'iran' در 'iranian')
+                                    if f' {country} ' in f' {tweet_text_lower} ':
+                                        country_flags_found.add(flag)
+                                
+                                if country_flags_found:
+                                    flags_str = "".join(country_flags_found)
+                                    emoji_prefix = flags_str + " " + emoji_prefix
+                                    print(f"   - پرچم کشور(ها) یافت شد: {flags_str}")
+
+
                                 message_to_send = (
                                     f"{emoji_prefix}"
                                     f"<b>New Tweet from {account}</b>\n\n"
@@ -179,7 +200,6 @@ def main():
                                     sent_tweets.add(tweet_link)
                                     new_tweets_found_in_this_run += 1
                         except Exception as inner_e:
-                            # اگر در پردازش یک توییت خاص مشکلی پیش آمد، از آن بگذر
                             print(f"   - خطای جزئی در پردازش یک توییت: {inner_e}")
                             continue
 
