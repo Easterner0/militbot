@@ -9,6 +9,8 @@ on:
 
 jobs:
   scrape:
+  permissions:
+  contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 4 # حداکثر زمان اجرا برای هر بار (کمتر از ۵ دقیقه)
 
