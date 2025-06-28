@@ -2,7 +2,7 @@ import time
 import random
 import requests
 import os
-import json # --- ایمپورت کردن کتابخانه استاندارد جیسون
+import json 
 from playwright.sync_api import sync_playwright
 
 # ------------------- بخش تنظیمات -------------------
@@ -42,23 +42,30 @@ SPECIAL_KEYWORDS = [
     "conflict zone", "strategic interests", "foreign intervention",
     "un resolution", "diplomatic crisis", "military escalation", "sanctions regime"
 ]
+
+# --- تنظیمات تلگرام ---
 TELEGRAM_BOT_TOKEN = "8096746493:AAHgoVUKL3Nu-joz4mAMb88PHW7MJ7ffpjQ"
+# شناسه کانال عمومی شما برای ارسال توییت‌ها
 TELEGRAM_CHAT_ID = "@xxxmilitary" 
+# !!! مهم: شناسه عددی چت خصوصی خودتان را برای دریافت خطاها اینجا وارد کنید
+ADMIN_CHAT_ID = "141252573" 
+
 SENT_TWEETS_FILE = "sent_tweets.txt"
-AUTH_FILE = "auth_state.json" # نام فایل کوکی
+AUTH_FILE = "auth_state.json"
 
 # ------------------- پایان بخش تنظیمات -------------------
 
-def send_telegram_message(message):
+def send_telegram_message(message, chat_id):
+    """تابعی برای ارسال پیام به تلگرام (به کانال عمومی یا ادمین)"""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
+    payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
     try:
         response = requests.post(url, json=payload, timeout=15)
         if response.status_code == 200:
-            print("✅ پیام با موفقیت به تلگرام ارسال شد.")
+            print(f"✅ پیام با موفقیت به chat_id: {chat_id} ارسال شد.")
             return True
         else:
-            print(f"❌ خطا در ارسال پیام به تلگرام: {response.text}")
+            print(f"❌ خطا در ارسال پیام به {chat_id}: {response.text}")
             return False
     except Exception as e:
         print(f"❌ خطای اتصال به تلگرام: {e}")
@@ -85,15 +92,13 @@ def main():
     with sync_playwright() as p:
         browser = None 
         try:
-            # بررسی وجود فایل کوکی
             if not os.path.exists(AUTH_FILE):
-                error_message = f"❌ فایل کوکی '{AUTH_FILE}' پیدا نشد! لطفاً ابتدا اسکریپت ذخیره کوکی را اجرا کنید."
+                error_message = f"❌ فایل کوکی '{AUTH_FILE}' پیدا نشد! لطفاً ابتدا اسکریپت ذخیره کوکی را اجرا کرده و فایل را در گیت‌هاب آپلود کنید."
                 print(error_message)
-                send_telegram_message(error_message)
+                send_telegram_message(error_message, ADMIN_CHAT_ID)
                 return
 
             print(f"فایل '{AUTH_FILE}' پیدا شد. در حال استفاده از کوکی برای ورود...")
-            # --- تغییر کلیدی: خواندن فایل کوکی با فرمت استاندارد JSON ---
             with open(AUTH_FILE, 'r') as f:
                 storage_state = json.load(f)
             
@@ -107,7 +112,7 @@ def main():
             if "home" not in page.url:
                 error_message = "❌ کوکی نامعتبر است یا منقضی شده. لطفاً فایل auth_state.json جدیدی بسازید و آپلود کنید."
                 print(error_message)
-                send_telegram_message(error_message)
+                send_telegram_message(error_message, ADMIN_CHAT_ID)
                 return
 
             print("✅ ورود با موفقیت (با استفاده از کوکی) انجام شد.")
@@ -143,11 +148,13 @@ def main():
                         message_to_send = (
                             f"{emoji_prefix}"
                             f"<b>New Tweet from {account}</b>\n\n"
-                            f"{tweet_text}\n\n"
-                            f"<a href='{tweet_link}'>Go to Tweet</a>"
+                            f"⭐️ {tweet_text}\n\n"
+                            f"<a href='{tweet_link}'>Go to Tweet</a>\n"
+                            f"—————\n"
+                            f"@xxxmilitary"
                         )
                         
-                        if send_telegram_message(message_to_send):
+                        if send_telegram_message(message_to_send, TELEGRAM_CHAT_ID):
                             save_sent_tweet(tweet_link)
                             sent_tweets.add(tweet_link)
                             new_tweets_found_in_this_run += 1
@@ -155,7 +162,9 @@ def main():
                         print("   - توییت جدیدی یافت نشد.")
 
                 except Exception as e:
-                    print(f"⚠️ خطایی در پردازش اکانت {account} رخ داد: {e}. به سراغ اکانت بعدی می‌رویم.")
+                    error_for_admin = f"⚠️ خطایی در پردازش اکانت {account} رخ داد. به سراغ اکانت بعدی می‌رویم.\n\n<pre>{e}</pre>"
+                    print(error_for_admin.replace("<pre>", "").replace("</pre>", ""))
+                    send_telegram_message(error_for_admin, ADMIN_CHAT_ID)
                     continue
 
         except Exception as e:
@@ -165,7 +174,7 @@ def main():
                 page.screenshot(path="error_screenshot.png")
                 print("یک اسکرین‌شات از صفحه در فایل error_screenshot.png ذخیره شد.")
             except: pass
-            send_telegram_message(error_message)
+            send_telegram_message(error_message, ADMIN_CHAT_ID)
 
         finally:
             print(f"\n🔚 کراولر به کار خود پایان داد. {new_tweets_found_in_this_run} توییت جدید در این اجرا ارسال شد.")
