@@ -30,7 +30,7 @@ jobs:
       run: python -m playwright install --with-deps
 
     - name: 5. Run the Twitter scraper script
-      run: python main.py
+      run: python tweet_forwarder.py
 
     - name: 6. Commit and push sent_tweets.txt if it changed
       uses: stefanzweifel/git-auto-commit-action@v5
