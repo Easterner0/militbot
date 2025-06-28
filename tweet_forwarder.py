@@ -2,7 +2,8 @@ import time
 import random
 import requests
 import os
-import json 
+import json
+from datetime import datetime, timezone, timedelta # --- ماژول‌های مورد نیاز برای کار با زمان
 from playwright.sync_api import sync_playwright
 
 # ------------------- بخش تنظیمات -------------------
@@ -47,8 +48,8 @@ SPECIAL_KEYWORDS = [
 TELEGRAM_BOT_TOKEN = "8096746493:AAHgoVUKL3Nu-joz4mAMb88PHW7MJ7ffpjQ"
 # شناسه کانال عمومی شما برای ارسال توییت‌ها
 TELEGRAM_CHAT_ID = "@xxxmilitary" 
-# !!! مهم: شناسه عددی چت خصوصی خودتان را برای دریافت خطاها اینجا وارد کنید
-ADMIN_CHAT_ID = "141252573" 
+# شناسه عددی چت خصوصی خودتان برای دریافت خطاها
+ADMIN_CHAT_ID = "634035651" 
 
 SENT_TWEETS_FILE = "sent_tweets.txt"
 AUTH_FILE = "auth_state.json"
@@ -56,7 +57,6 @@ AUTH_FILE = "auth_state.json"
 # ------------------- پایان بخش تنظیمات -------------------
 
 def send_telegram_message(message, chat_id):
-    """تابعی برای ارسال پیام به تلگرام (به کانال عمومی یا ادمین)"""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
     try:
@@ -118,6 +118,9 @@ def main():
             print("✅ ورود با موفقیت (با استفاده از کوکی) انجام شد.")
             human_like_delay()
 
+            # --- تغییر کلیدی: تعریف محدوده زمانی ۵ دقیقه اخیر ---
+            five_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
+
             for account in TARGET_ACCOUNTS:
                 try: 
                     account_name = account.strip('@')
@@ -126,40 +129,59 @@ def main():
                     page.goto(profile_url, timeout=60000)
                     page.wait_for_selector('//article[@data-testid="tweet"]', timeout=60000)
                     
-                    latest_tweet_element = page.locator('//article[@data-testid="tweet"]').first
-                    
-                    link_element = latest_tweet_element.locator('a[href*="/status/"]').first
-                    tweet_link = "https://x.com" + link_element.get_attribute('href')
-                    
-                    if "/status/" in tweet_link and tweet_link not in sent_tweets:
-                        print(f"✅ توییت جدید یافت شد: {tweet_link}")
-                        
-                        tweet_text_element = latest_tweet_element.locator('div[data-testid="tweetText"]')
-                        tweet_text = tweet_text_element.inner_text()
-                        
-                        emoji_prefix = ""
-                        tweet_text_lower = tweet_text.lower()
-                        for keyword in SPECIAL_KEYWORDS:
-                            if keyword in tweet_text_lower:
-                                emoji_prefix = "🚨💥❗️\n"
-                                print(f"   - کلمه کلیدی ویژه یافت شد: '{keyword}'")
-                                break
-                        
-                        message_to_send = (
-                            f"{emoji_prefix}"
-                            f"<b>New Tweet from {account}</b>\n\n"
-                            f"⭐️ {tweet_text}\n\n"
-                            f"<a href='{tweet_link}'>Go to Tweet</a>\n"
-                            f"—————\n"
-                            f"@xxxmilitary"
-                        )
-                        
-                        if send_telegram_message(message_to_send, TELEGRAM_CHAT_ID):
-                            save_sent_tweet(tweet_link)
-                            sent_tweets.add(tweet_link)
-                            new_tweets_found_in_this_run += 1
-                    else:
-                        print("   - توییت جدیدی یافت نشد.")
+                    # کمی اسکرول برای بارگذاری چند توییت اخیر
+                    for _ in range(2):
+                        page.keyboard.press("PageDown")
+                        time.sleep(1)
+
+                    all_recent_tweets = page.locator('//article[@data-testid="tweet"]').all()
+                    print(f"   - تعداد {len(all_recent_tweets)} توییت اخیر بررسی می‌شود...")
+
+                    for tweet_element in all_recent_tweets:
+                        # --- تغییر کلیدی: بررسی زمان ارسال توییت ---
+                        try:
+                            time_element = tweet_element.locator("time").first
+                            timestamp_str = time_element.get_attribute("datetime")
+                            tweet_time = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+
+                            # اگر توییت قدیمی‌تر از ۵ دقیقه بود، از آن و بقیه توییت‌های این کاربر بگذر
+                            if tweet_time < five_minutes_ago:
+                                continue # برو سراغ توییت بعدی در همین صفحه
+                            
+                            link_element = tweet_element.locator('a[href*="/status/"]').first
+                            tweet_link = "https://x.com" + link_element.get_attribute('href')
+                            
+                            if "/status/" in tweet_link and tweet_link not in sent_tweets:
+                                print(f"✅ توییت جدید (در ۵ دقیقه اخیر) یافت شد: {tweet_link}")
+                                
+                                tweet_text_element = tweet_element.locator('div[data-testid="tweetText"]')
+                                tweet_text = tweet_text_element.inner_text()
+                                
+                                emoji_prefix = ""
+                                tweet_text_lower = tweet_text.lower()
+                                for keyword in SPECIAL_KEYWORDS:
+                                    if keyword in tweet_text_lower:
+                                        emoji_prefix = "🚨💥❗️\n"
+                                        print(f"   - کلمه کلیدی ویژه یافت شد: '{keyword}'")
+                                        break
+                                
+                                message_to_send = (
+                                    f"{emoji_prefix}"
+                                    f"<b>New Tweet from {account}</b>\n\n"
+                                    f"⭐️ {tweet_text}\n\n"
+                                    f"<a href='{tweet_link}'>Go to Tweet</a>\n"
+                                    f"—————\n"
+                                    f"@xxxmilitary"
+                                )
+                                
+                                if send_telegram_message(message_to_send, TELEGRAM_CHAT_ID):
+                                    save_sent_tweet(tweet_link)
+                                    sent_tweets.add(tweet_link)
+                                    new_tweets_found_in_this_run += 1
+                        except Exception as inner_e:
+                            # اگر در پردازش یک توییت خاص مشکلی پیش آمد، از آن بگذر
+                            print(f"   - خطای جزئی در پردازش یک توییت: {inner_e}")
+                            continue
 
                 except Exception as e:
                     error_for_admin = f"⚠️ خطایی در پردازش اکانت {account} رخ داد. به سراغ اکانت بعدی می‌رویم.\n\n<pre>{e}</pre>"
