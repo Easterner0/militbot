@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 TARGET_ACCOUNTS = [
     "@Philipp27960841", "@FaytuksNetwork", "@no_itsmyturn",
     "@AZ_Intel_", "@JasonMBrodsky", "@sentdefender",
-    "@OSINTtechnical", "@IntelCrab", "@AuroraIntel", "@EretzInfo"
+    "@OSINTtechnical", "@IntelCrab", "@AuroraIntel"
 ]
 SPECIAL_KEYWORDS = [
     "iran", "islamic republic", "tehran", "ayatollah khamenei", "supreme leader",
@@ -60,7 +60,7 @@ SENT_TWEETS_FILE = "sent_tweets.txt"
 AUTH_FILE = "auth_state.json"
 TIMESTAMP_FILE = "last_run_timestamp.txt"
 
-# ------------------- توابع کمکی (بدون تغییر) -------------------
+# ------------------- توابع کمکی (با تغییرات) -------------------
 def send_telegram_message(message, chat_id):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
@@ -96,15 +96,19 @@ def get_last_run_time():
         print(f"خطا در خواندن فایل زمان‌بندی: {e}. از بازه پیش‌فرض استفاده می‌شود.")
         return default_start_time
 def save_current_run_time(run_time):
+    # --- تغییر کلیدی: ایجاد یک همپوشانی امن ۲ دقیقه‌ای ---
+    # این کار تضمین می‌کند هیچ توییتی بین دو اجرا از دست نرود.
+    safe_time_to_save = run_time - timedelta(minutes=2)
     with open(TIMESTAMP_FILE, "w") as f:
-        f.write(run_time.isoformat())
+        f.write(safe_time_to_save.isoformat())
+
 def human_like_delay(min_seconds=2, max_seconds=4):
     time.sleep(random.uniform(min_seconds, max_seconds))
 
-# ------------------- تابع اصلی (با تغییرات) -------------------
+# ------------------- تابع اصلی (با تغییرات جزئی) -------------------
 def main():
     new_tweets_found_in_this_run = 0
-    run_successful = False # متغیری برای پیگیری موفقیت کلی اجرا
+    run_successful = False
     
     sent_tweets = load_sent_tweets()
     print(f"🚀 کراولر توییتر شروع به کار کرد... ({len(sent_tweets)} توییت قبلا ارسال شده است)")
@@ -144,7 +148,6 @@ def main():
                     print(f"\n۲. در حال بررسی اکانت: {account}")
                     
                     page.goto(profile_url, timeout=60000)
-                    # افزایش زمان انتظار برای بارگذاری توییت‌ها
                     page.wait_for_selector('//article[@data-testid="tweet"]', timeout=45000)
                     
                     for i in range(2):
@@ -212,7 +215,6 @@ def main():
                     send_telegram_message(error_for_admin, ADMIN_CHAT_ID)
                     continue
             
-            # اگر اسکریپت به این نقطه برسد، یعنی اجرای کلی موفقیت‌آمیز بوده است
             run_successful = True
 
         except Exception as e:
@@ -224,10 +226,10 @@ def main():
             send_telegram_message(error_message, ADMIN_CHAT_ID)
         finally:
             if run_successful:
+                # --- تغییر کلیدی: زمان شروع این اجرا را در فایل ذخیره می‌کنیم ---
                 save_current_run_time(start_time_for_this_run)
-                print(f"زمان اجرای فعلی با موفقیت در فایل '{TIMESTAMP_FILE}' ذخیره شد.")
+                print(f"زمان اجرای امن برای دفعه بعد با موفقیت در فایل '{TIMESTAMP_FILE}' ذخیره شد.")
                 
-                # --- بخش جدید: ارسال پیام وضعیت به ادمین ---
                 status_message = f"✅ اجرای کراولر با موفقیت تمام شد.\n<b>{new_tweets_found_in_this_run}</b> توییت جدید ارسال شد."
                 send_telegram_message(status_message, ADMIN_CHAT_ID)
 
