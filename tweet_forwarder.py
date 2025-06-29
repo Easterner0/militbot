@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone, timedelta
 from playwright.sync_api import sync_playwright
 
-# ------------------- بخش تنظیمات -------------------
+# ------------------- بخش تنظیمات (بدون تغییر) -------------------
 TARGET_ACCOUNTS = [
     "@Philipp27960841", "@FaytuksNetwork", "@no_itsmyturn",
     "@AZ_Intel_", "@JasonMBrodsky", "@sentdefender",
@@ -55,14 +55,12 @@ COUNTRY_FLAGS = {
 }
 TELEGRAM_BOT_TOKEN = "8096746493:AAHgoVUKL3Nu-joz4mAMb88PHW7MJ7ffpjQ"
 TELEGRAM_CHAT_ID = "@xxxmilitary" 
-ADMIN_CHAT_ID = "634035651" 
+ADMIN_CHAT_ID = "141252573" 
 SENT_TWEETS_FILE = "sent_tweets.txt"
 AUTH_FILE = "auth_state.json"
-# --- فایل جدید برای ذخیره زمان ---
 TIMESTAMP_FILE = "last_run_timestamp.txt"
 
-# ------------------- پایان بخش تنظیمات -------------------
-
+# ------------------- توابع کمکی (بدون تغییر) -------------------
 def send_telegram_message(message, chat_id):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
@@ -77,20 +75,15 @@ def send_telegram_message(message, chat_id):
     except Exception as e:
         print(f"❌ خطای اتصال به تلگرام: {e}")
         return False
-
 def load_sent_tweets():
     if not os.path.exists(SENT_TWEETS_FILE):
         return set()
     with open(SENT_TWEETS_FILE, "r") as f:
         return set(line.strip() for line in f)
-
 def save_sent_tweet(tweet_url):
     with open(SENT_TWEETS_FILE, "a") as f:
         f.write(tweet_url + "\n")
-
 def get_last_run_time():
-    """زمان آخرین اجرای موفق را از فایل می‌خواند"""
-    # برای اولین اجرا، یک بازه زمانی امن (مثلاً ۲۰ دقیقه‌ای) در نظر می‌گیریم
     default_start_time = datetime.now(timezone.utc) - timedelta(minutes=20)
     if not os.path.exists(TIMESTAMP_FILE):
         print(f"فایل زمان‌بندی پیدا نشد. از بازه پیش‌فرض {20} دقیقه‌ای استفاده می‌شود.")
@@ -102,21 +95,18 @@ def get_last_run_time():
     except Exception as e:
         print(f"خطا در خواندن فایل زمان‌بندی: {e}. از بازه پیش‌فرض استفاده می‌شود.")
         return default_start_time
-
 def save_current_run_time(run_time):
-    """زمان اجرای فعلی را برای استفاده در دفعه بعد ذخیره می‌کند"""
     with open(TIMESTAMP_FILE, "w") as f:
         f.write(run_time.isoformat())
-
 def human_like_delay(min_seconds=2, max_seconds=4):
     time.sleep(random.uniform(min_seconds, max_seconds))
 
+# ------------------- تابع اصلی (با تغییرات) -------------------
 def main():
     new_tweets_found_in_this_run = 0
     sent_tweets = load_sent_tweets()
     print(f"🚀 کراولر توییتر شروع به کار کرد... ({len(sent_tweets)} توییت قبلا ارسال شده است)")
     
-    # --- تغییر کلیدی: خواندن زمان آخرین اجرا و ذخیره زمان فعلی ---
     start_time_for_this_run = datetime.now(timezone.utc)
     check_tweets_since = get_last_run_time()
     print(f"در حال بررسی توییت‌های منتشر شده از: {check_tweets_since.strftime('%Y-%m-%d %H:%M:%S UTC')}")
@@ -150,22 +140,32 @@ def main():
                     account_name = account.strip('@')
                     profile_url = f"https://x.com/{account_name}"
                     print(f"\n۲. در حال بررسی اکانت: {account}")
-                    page.goto(profile_url, timeout=60000)
-                    page.wait_for_selector('//article[@data-testid="tweet"]', timeout=60000)
                     
-                    for _ in range(2):
+                    print("   - در حال رفتن به صفحه پروفایل...")
+                    page.goto(profile_url, timeout=60000)
+                    
+                    print("   - منتظر ماندن برای بارگذاری توییت‌ها...")
+                    page.wait_for_selector('//article[@data-testid="tweet"]', timeout=30000)
+                    print("   - توییت‌ها با موفقیت بارگذاری شدند.")
+                    
+                    for i in range(2):
                         page.keyboard.press("PageDown")
                         time.sleep(1)
-
+                    
                     all_recent_tweets = page.locator('//article[@data-testid="tweet"]').all()
                     
+                    if not all_recent_tweets:
+                        print("   - هیچ توییتی در صفحه پیدا نشد. به سراغ اکانت بعدی می‌رویم.")
+                        continue
+                        
+                    print(f"   - تعداد {len(all_recent_tweets)} توییت برای بررسی پیدا شد.")
+
                     for tweet_element in all_recent_tweets:
                         try:
                             time_element = tweet_element.locator("time").first
                             timestamp_str = time_element.get_attribute("datetime")
                             tweet_time = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
 
-                            # --- تغییر کلیدی: مقایسه با زمان آخرین اجرا ---
                             if tweet_time < check_tweets_since:
                                 continue 
                             
@@ -208,12 +208,21 @@ def main():
                             print(f"   - خطای جزئی در پردازش یک توییت: {inner_e}")
                             continue
                 except Exception as e:
+                    # --- گزارش خطا و اسکرین‌شات بهبود یافته ---
+                    print(f"⚠️ یک خطای جدی در پردازش اکانت {account} رخ داد.")
                     error_for_admin = f"⚠️ خطایی در پردازش اکانت {account} رخ داد:\n\n<pre>{e}</pre>"
                     print(error_for_admin.replace("<pre>", "").replace("</pre>", ""))
+                    
+                    try:
+                        screenshot_path = f"error_{account_name}.png"
+                        page.screenshot(path=screenshot_path)
+                        print(f"   - اسکرین‌شات خطا در فایل {screenshot_path} ذخیره شد.")
+                    except Exception as screenshot_error:
+                        print(f"   - گرفتن اسکرین‌شات با خطا مواجه شد: {screenshot_error}")
+                        
                     send_telegram_message(error_for_admin, ADMIN_CHAT_ID)
                     continue
             
-            # --- تغییر کلیدی: ذخیره زمان اجرای فعلی برای دفعه بعد ---
             save_current_run_time(start_time_for_this_run)
             print(f"زمان اجرای فعلی با موفقیت در فایل '{TIMESTAMP_FILE}' ذخیره شد.")
 
@@ -221,7 +230,7 @@ def main():
             error_message = f"❌ یک خطای کلی در اسکریپت رخ داد:\n\n<pre>{e}</pre>"
             print(error_message.replace("<pre>", "").replace("</pre>", ""))
             try:
-                page.screenshot(path="error_screenshot.png")
+                page.screenshot(path="error_overall.png")
             except: pass
             send_telegram_message(error_message, ADMIN_CHAT_ID)
         finally:
