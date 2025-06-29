@@ -55,9 +55,11 @@ COUNTRY_FLAGS = {
 }
 TELEGRAM_BOT_TOKEN = "8096746493:AAHgoVUKL3Nu-joz4mAMb88PHW7MJ7ffpjQ"
 TELEGRAM_CHAT_ID = "@xxxmilitary" 
-ADMIN_CHAT_ID = "141252573" 
+ADMIN_CHAT_ID = "634035651" 
 SENT_TWEETS_FILE = "sent_tweets.txt"
 AUTH_FILE = "auth_state.json"
+# --- فایل جدید برای ذخیره زمان ---
+TIMESTAMP_FILE = "last_run_timestamp.txt"
 
 # ------------------- پایان بخش تنظیمات -------------------
 
@@ -86,6 +88,26 @@ def save_sent_tweet(tweet_url):
     with open(SENT_TWEETS_FILE, "a") as f:
         f.write(tweet_url + "\n")
 
+def get_last_run_time():
+    """زمان آخرین اجرای موفق را از فایل می‌خواند"""
+    # برای اولین اجرا، یک بازه زمانی امن (مثلاً ۲۰ دقیقه‌ای) در نظر می‌گیریم
+    default_start_time = datetime.now(timezone.utc) - timedelta(minutes=20)
+    if not os.path.exists(TIMESTAMP_FILE):
+        print(f"فایل زمان‌بندی پیدا نشد. از بازه پیش‌فرض {20} دقیقه‌ای استفاده می‌شود.")
+        return default_start_time
+    try:
+        with open(TIMESTAMP_FILE, "r") as f:
+            timestamp_str = f.read().strip()
+            return datetime.fromisoformat(timestamp_str)
+    except Exception as e:
+        print(f"خطا در خواندن فایل زمان‌بندی: {e}. از بازه پیش‌فرض استفاده می‌شود.")
+        return default_start_time
+
+def save_current_run_time(run_time):
+    """زمان اجرای فعلی را برای استفاده در دفعه بعد ذخیره می‌کند"""
+    with open(TIMESTAMP_FILE, "w") as f:
+        f.write(run_time.isoformat())
+
 def human_like_delay(min_seconds=2, max_seconds=4):
     time.sleep(random.uniform(min_seconds, max_seconds))
 
@@ -93,6 +115,11 @@ def main():
     new_tweets_found_in_this_run = 0
     sent_tweets = load_sent_tweets()
     print(f"🚀 کراولر توییتر شروع به کار کرد... ({len(sent_tweets)} توییت قبلا ارسال شده است)")
+    
+    # --- تغییر کلیدی: خواندن زمان آخرین اجرا و ذخیره زمان فعلی ---
+    start_time_for_this_run = datetime.now(timezone.utc)
+    check_tweets_since = get_last_run_time()
+    print(f"در حال بررسی توییت‌های منتشر شده از: {check_tweets_since.strftime('%Y-%m-%d %H:%M:%S UTC')}")
 
     with sync_playwright() as p:
         browser = None 
@@ -103,7 +130,6 @@ def main():
                 send_telegram_message(error_message, ADMIN_CHAT_ID)
                 return
 
-            print(f"فایل '{AUTH_FILE}' پیدا شد. در حال استفاده از کوکی برای ورود...")
             with open(AUTH_FILE, 'r') as f:
                 storage_state = json.load(f)
             
@@ -111,19 +137,13 @@ def main():
             context = browser.new_context(storage_state=storage_state, user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
             page = context.new_page()
             
-            print("در حال بررسی وضعیت ورود با مراجعه به صفحه Home...")
             page.goto("https://x.com/home", wait_until='domcontentloaded', timeout=40000)
-            
             if "home" not in page.url:
                 error_message = "❌ کوکی نامعتبر است یا منقضی شده. لطفاً فایل auth_state.json جدیدی بسازید و آپلود کنید."
                 print(error_message)
                 send_telegram_message(error_message, ADMIN_CHAT_ID)
                 return
-
             print("✅ ورود با موفقیت (با استفاده از کوکی) انجام شد.")
-            human_like_delay()
-
-            five_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=5, seconds=30)
 
             for account in TARGET_ACCOUNTS:
                 try: 
@@ -138,45 +158,38 @@ def main():
                         time.sleep(1)
 
                     all_recent_tweets = page.locator('//article[@data-testid="tweet"]').all()
-                    print(f"   - تعداد {len(all_recent_tweets)} توییت اخیر بررسی می‌شود...")
-
+                    
                     for tweet_element in all_recent_tweets:
                         try:
                             time_element = tweet_element.locator("time").first
                             timestamp_str = time_element.get_attribute("datetime")
                             tweet_time = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
 
-                            if tweet_time < five_minutes_ago:
+                            # --- تغییر کلیدی: مقایسه با زمان آخرین اجرا ---
+                            if tweet_time < check_tweets_since:
                                 continue 
                             
                             link_element = tweet_element.locator('a[href*="/status/"]').first
                             tweet_link = "https://x.com" + link_element.get_attribute('href')
                             
                             if "/status/" in tweet_link and tweet_link not in sent_tweets:
-                                print(f"✅ توییت جدید (در ۵ دقیقه اخیر) یافت شد: {tweet_link}")
-                                
-                                # --- رفع خطای Strict Mode با استفاده از .first ---
                                 tweet_text_element = tweet_element.locator('div[data-testid="tweetText"]').first
                                 tweet_text = tweet_text_element.inner_text()
                                 
-                                emoji_prefix = ""
+                                emoji_prefix, country_flags_found = "", set()
                                 tweet_text_lower = tweet_text.lower()
                                 
                                 for keyword in SPECIAL_KEYWORDS:
                                     if keyword in tweet_text_lower:
                                         emoji_prefix = "🚨💥❗️\n"
-                                        print(f"   - کلمه کلیدی ویژه یافت شد: '{keyword}'")
                                         break
                                 
-                                country_flags_found = set()
                                 for country, flag in COUNTRY_FLAGS.items():
                                     if f' {country} ' in f' {tweet_text_lower} ':
                                         country_flags_found.add(flag)
                                 
                                 if country_flags_found:
-                                    flags_str = "".join(country_flags_found)
-                                    emoji_prefix = flags_str + " " + emoji_prefix
-                                    print(f"   - پرچم کشور(ها) یافت شد: {flags_str}")
+                                    emoji_prefix = "".join(country_flags_found) + " " + emoji_prefix
 
                                 message_to_send = (
                                     f"{emoji_prefix}"
@@ -194,22 +207,23 @@ def main():
                         except Exception as inner_e:
                             print(f"   - خطای جزئی در پردازش یک توییت: {inner_e}")
                             continue
-
                 except Exception as e:
-                    error_for_admin = f"⚠️ خطایی در پردازش اکانت {account} رخ داد. به سراغ اکانت بعدی می‌رویم.\n\n<pre>{e}</pre>"
+                    error_for_admin = f"⚠️ خطایی در پردازش اکانت {account} رخ داد:\n\n<pre>{e}</pre>"
                     print(error_for_admin.replace("<pre>", "").replace("</pre>", ""))
                     send_telegram_message(error_for_admin, ADMIN_CHAT_ID)
                     continue
+            
+            # --- تغییر کلیدی: ذخیره زمان اجرای فعلی برای دفعه بعد ---
+            save_current_run_time(start_time_for_this_run)
+            print(f"زمان اجرای فعلی با موفقیت در فایل '{TIMESTAMP_FILE}' ذخیره شد.")
 
         except Exception as e:
             error_message = f"❌ یک خطای کلی در اسکریپت رخ داد:\n\n<pre>{e}</pre>"
             print(error_message.replace("<pre>", "").replace("</pre>", ""))
             try:
                 page.screenshot(path="error_screenshot.png")
-                print("یک اسکرین‌شات از صفحه در فایل error_screenshot.png ذخیره شد.")
             except: pass
             send_telegram_message(error_message, ADMIN_CHAT_ID)
-
         finally:
             print(f"\n🔚 کراولر به کار خود پایان داد. {new_tweets_found_in_this_run} توییت جدید در این اجرا ارسال شد.")
             if browser:
