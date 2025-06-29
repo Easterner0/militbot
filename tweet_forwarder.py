@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 TARGET_ACCOUNTS = [
     "@Philipp27960841", "@FaytuksNetwork", "@no_itsmyturn",
     "@AZ_Intel_", "@JasonMBrodsky", "@sentdefender",
-    "@OSINTtechnical", "@IntelCrab", "@AuroraIntel"
+    "@OSINTtechnical", "@IntelCrab", "@AuroraIntel", "@EretzInfo"
 ]
 SPECIAL_KEYWORDS = [
     "iran", "islamic republic", "tehran", "ayatollah khamenei", "supreme leader",
@@ -104,6 +104,8 @@ def human_like_delay(min_seconds=2, max_seconds=4):
 # ------------------- تابع اصلی (با تغییرات) -------------------
 def main():
     new_tweets_found_in_this_run = 0
+    run_successful = False # متغیری برای پیگیری موفقیت کلی اجرا
+    
     sent_tweets = load_sent_tweets()
     print(f"🚀 کراولر توییتر شروع به کار کرد... ({len(sent_tweets)} توییت قبلا ارسال شده است)")
     
@@ -141,12 +143,9 @@ def main():
                     profile_url = f"https://x.com/{account_name}"
                     print(f"\n۲. در حال بررسی اکانت: {account}")
                     
-                    print("   - در حال رفتن به صفحه پروفایل...")
                     page.goto(profile_url, timeout=60000)
-                    
-                    print("   - منتظر ماندن برای بارگذاری توییت‌ها...")
-                    page.wait_for_selector('//article[@data-testid="tweet"]', timeout=30000)
-                    print("   - توییت‌ها با موفقیت بارگذاری شدند.")
+                    # افزایش زمان انتظار برای بارگذاری توییت‌ها
+                    page.wait_for_selector('//article[@data-testid="tweet"]', timeout=45000)
                     
                     for i in range(2):
                         page.keyboard.press("PageDown")
@@ -155,7 +154,7 @@ def main():
                     all_recent_tweets = page.locator('//article[@data-testid="tweet"]').all()
                     
                     if not all_recent_tweets:
-                        print("   - هیچ توییتی در صفحه پیدا نشد. به سراغ اکانت بعدی می‌رویم.")
+                        print("   - هیچ توییتی در صفحه پیدا نشد.")
                         continue
                         
                     print(f"   - تعداد {len(all_recent_tweets)} توییت برای بررسی پیدا شد.")
@@ -208,23 +207,13 @@ def main():
                             print(f"   - خطای جزئی در پردازش یک توییت: {inner_e}")
                             continue
                 except Exception as e:
-                    # --- گزارش خطا و اسکرین‌شات بهبود یافته ---
-                    print(f"⚠️ یک خطای جدی در پردازش اکانت {account} رخ داد.")
                     error_for_admin = f"⚠️ خطایی در پردازش اکانت {account} رخ داد:\n\n<pre>{e}</pre>"
                     print(error_for_admin.replace("<pre>", "").replace("</pre>", ""))
-                    
-                    try:
-                        screenshot_path = f"error_{account_name}.png"
-                        page.screenshot(path=screenshot_path)
-                        print(f"   - اسکرین‌شات خطا در فایل {screenshot_path} ذخیره شد.")
-                    except Exception as screenshot_error:
-                        print(f"   - گرفتن اسکرین‌شات با خطا مواجه شد: {screenshot_error}")
-                        
                     send_telegram_message(error_for_admin, ADMIN_CHAT_ID)
                     continue
             
-            save_current_run_time(start_time_for_this_run)
-            print(f"زمان اجرای فعلی با موفقیت در فایل '{TIMESTAMP_FILE}' ذخیره شد.")
+            # اگر اسکریپت به این نقطه برسد، یعنی اجرای کلی موفقیت‌آمیز بوده است
+            run_successful = True
 
         except Exception as e:
             error_message = f"❌ یک خطای کلی در اسکریپت رخ داد:\n\n<pre>{e}</pre>"
@@ -234,6 +223,14 @@ def main():
             except: pass
             send_telegram_message(error_message, ADMIN_CHAT_ID)
         finally:
+            if run_successful:
+                save_current_run_time(start_time_for_this_run)
+                print(f"زمان اجرای فعلی با موفقیت در فایل '{TIMESTAMP_FILE}' ذخیره شد.")
+                
+                # --- بخش جدید: ارسال پیام وضعیت به ادمین ---
+                status_message = f"✅ اجرای کراولر با موفقیت تمام شد.\n<b>{new_tweets_found_in_this_run}</b> توییت جدید ارسال شد."
+                send_telegram_message(status_message, ADMIN_CHAT_ID)
+
             print(f"\n🔚 کراولر به کار خود پایان داد. {new_tweets_found_in_this_run} توییت جدید در این اجرا ارسال شد.")
             if browser:
                 browser.close()
