@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 TARGET_ACCOUNTS = [
     "@Philipp27960841", "@FaytuksNetwork", "@no_itsmyturn",
     "@AZ_Intel_", "@JasonMBrodsky", "@sentdefender",
-    "@OSINTtechnical", "@IntelCrab", "@AuroraIntel"
+    "@OSINTtechnical", "@IntelCrab", "@AuroraIntel", "@benreuter_imint"
 ]
 SPECIAL_KEYWORDS = [
     "iran", "islamic republic", "tehran", "ayatollah khamenei", "supreme leader",
